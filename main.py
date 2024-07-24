@@ -69,37 +69,6 @@ def check_conflict(start_time, end_time, appointments):
 
     return False  # No conflict found
 
-
-def create_appointment(agent_login, guest_name, start_time, end_time):
-    # to avoid duplicating this repeatedly, make a build_payload method that
-    # takes args and returns the data dict
-    data = {
-        "data": {
-            "type": "appointments",
-            "attributes": {
-                "meeting-point": True,
-                "start-time": start_time.isoformat() + 'Z',
-                "end-time": end_time.isoformat() + 'Z',     # ew gross
-                # DATETIME.strftime(end_time, "%Y-%m-%d %H:%M:%SZ")
-                "status": "SCHEDULED",
-                "agent-login": agent_login,
-                "usecase-id": USECASE_ID,
-                "guest-display-name": guest_name,
-                "agent-display-name": "Nate Brown"
-            }
-        }
-    }
-    # change data to json and remove json.dumps()
-    response = requests.post(BASE_URL, headers=HEADERS, data=json.dumps(data))
-    if response.status_code == 201:
-        return response.json()
-    else:
-        print(f"Error creating appointment: {response.status_code}")
-
-
-
-
-
 @APP.route('/')
 def index():
     page_number = request.args.get('page', 1, type=int)
@@ -130,15 +99,32 @@ def add_appointment():
             'status': 'error',
             'message': 'Time slot not available. Please choose a different time slot.'
         }), 409
-
-    appointment = create_appointment(AGENT_LOGIN, guest_name, start_time, end_time)
-    if appointment:
+    data = {
+        "data": {
+            "type": "appointments",
+            "attributes": {
+                "meeting-point": True,
+                "start-time": start_time.isoformat() + 'Z',
+                "end-time": end_time.isoformat() + 'Z',  # ew gross
+                # DATETIME.strftime(end_time, "%Y-%m-%d %H:%M:%SZ")
+                "status": "SCHEDULED",
+                "agent-login": AGENT_LOGIN,
+                "usecase-id": USECASE_ID,
+                "guest-display-name": guest_name,
+                "agent-display-name": "Nate Brown"
+            }
+        }
+    }
+    response = requests.post(BASE_URL, headers=HEADERS, json=data)
+    if response.status_code == 201:
         return redirect(url_for('index'))
     else:
         return jsonify({
             'status': 'error',
             'message': 'Failed to create appointment.'
         }), 500
+
+
 
 def update_appointment(appointment_id, guest_name, start_time, end_time):
     data = {
