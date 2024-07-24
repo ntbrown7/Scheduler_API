@@ -1,10 +1,8 @@
-# Use import logging
-
 from flask import Flask, render_template, request, redirect, url_for, jsonify
 import requests
 import json
 from datetime import datetime
-import os
+
 
 APP = Flask(__name__)
 
@@ -21,9 +19,6 @@ HEADERS = {
     'Content-Type': 'application/vnd.api+json',
     'X-Authorization': f'Token {API_KEY}'
 }
-
-
-
 
 def get_appointments(page_number=1, page_size=50):
     params = {
@@ -69,6 +64,7 @@ def check_conflict(start_time, end_time, appointments):
 
     return False  # No conflict found
 
+
 @APP.route('/')
 def index():
     page_number = request.args.get('page', 1, type=int)
@@ -83,40 +79,21 @@ def index():
     )
 
 
-
 @APP.route('/add', methods=['POST'])
 def add_appointment():
     guest_name = request.form['guest_name']
     # see date comments above
     start_time = datetime.fromisoformat(request.form['start_time'])
     end_time = datetime.fromisoformat(request.form['end_time'])
-
-    # explain that _ is placeholder, and you only care about
-    # appointments in this case
     appointments, _, _ = get_appointments()
     if check_conflict(start_time, end_time, appointments):
         return jsonify({
             'status': 'error',
             'message': 'Time slot not available. Please choose a different time slot.'
         }), 409
-    data = {
-        "data": {
-            "type": "appointments",
-            "attributes": {
-                "meeting-point": True,
-                "start-time": start_time.isoformat() + 'Z',
-                "end-time": end_time.isoformat() + 'Z',  # ew gross
-                # DATETIME.strftime(end_time, "%Y-%m-%d %H:%M:%SZ")
-                "status": "SCHEDULED",
-                "agent-login": AGENT_LOGIN,
-                "usecase-id": USECASE_ID,
-                "guest-display-name": guest_name,
-                "agent-display-name": "Nate Brown"
-            }
-        }
-    }
-    response = requests.post(BASE_URL, headers=HEADERS, json=data)
-    if response.status_code == 201:
+
+    appointment = create_appointment(AGENT_LOGIN, guest_name, start_time, end_time)
+    if appointment:
         return redirect(url_for('index'))
     else:
         return jsonify({
@@ -124,26 +101,30 @@ def add_appointment():
             'message': 'Failed to create appointment.'
         }), 500
 
-
-
-def update_appointment(appointment_id, guest_name, start_time, end_time):
+def create_appointment(agent_login, guest_name, start_time, end_time):
+    # to avoid duplicating this repeatedly, make a build_payload method that
+    # takes args and returns the data dict
     data = {
         "data": {
-            "id": appointment_id,
             "type": "appointments",
             "attributes": {
+                "meeting-point": True,
                 "start-time": start_time.isoformat() + 'Z',
                 "end-time": end_time.isoformat() + 'Z',
-                "guest-display-name": guest_name
+                "status": "SCHEDULED",
+                "agent-login": agent_login,
+                "usecase-id": USECASE_ID,
+                "guest-display-name": guest_name,
+                "agent-display-name": "Nate Brown"
             }
         }
     }
     # change data to json and remove json.dumps()
-    response = requests.patch(f"{BASE_URL}/{appointment_id}", headers=HEADERS, data=json.dumps(data))
-    if response.status_code == 200:
+    response = requests.post(BASE_URL, headers=HEADERS, json=data)
+    if response.status_code == 201:
         return response.json()
     else:
-        print(f"Error updating appointment: {response.status_code}")
+        print(f"Error creating appointment: {response.status_code}")
 
 
 @APP.route('/update', methods=['POST'])
@@ -173,6 +154,23 @@ def change_appointment_route():
         }), 500
 
 
+def update_appointment(appointment_id, guest_name, start_time, end_time):
+    data = {
+        "data": {
+            "id": appointment_id,
+            "type": "appointments",
+            "attributes": {
+                "start-time": start_time.isoformat() + 'Z',
+                "end-time": end_time.isoformat() + 'Z',
+                "guest-display-name": guest_name
+            }
+        }
+    }
+    response = requests.patch(f"{BASE_URL}/{appointment_id}", headers=HEADERS, json=data)
+    if response.status_code == 200:
+        return response.json()
+    else:
+        print(f"Error updating appointment: {response.status_code}")
 
 
 @APP.route('/delete/<int:appointment_id>', methods=['POST'])
