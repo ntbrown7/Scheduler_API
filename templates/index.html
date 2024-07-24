@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Appointment Scheduler</title>
+    <link href="https://cdn.jsdelivr.net/npm/fullcalendar@5.10.2/main.min.css" rel="stylesheet">
+    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        #listView {
+            display: none;
+        }
+        .appointment-item {
+            font-size: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .appointment-details {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .appointment-actions {
+            margin-left: 10px;
+        }
+    </style>
+</head>
+<body>
+<div class="container mt-5">
+    <h1>Appointment Scheduler</h1>
+    <div id="alert-placeholder"></div>
+
+    <div id="calendarView">
+        <h2>Current Appointments</h2>
+        <div id="calendar"></div>
+    </div>
+
+    <div id="listView">
+        <button id="toggleViewButton2" class="btn btn-primary mb-3">Toggle View</button>
+        <h2>Appointment List</h2>
+        <ul id="appointmentList" class="list-group"></ul>
+    </div>
+    <button id="toggleViewButton1" class="btn btn-primary mb-3">Toggle View</button>
+</div>
+
+<!-- Add Appointment Modal -->
+<div class="modal fade" id="addAppointmentModal" tabindex="-1" aria-labelledby="addAppointmentModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form id="addAppointmentForm" method="POST" action="{{ url_for('add_appointment') }}">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="addAppointmentModalLabel">Add Appointment</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="guest_name">Guest Name</label>
+                        <input type="text" class="form-control" id="guest_name" name="guest_name" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="start_time">Start Time</label>
+                        <input type="datetime-local" class="form-control" id="start_time" name="start_time" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="end_time">End Time</label>
+                        <input type="datetime-local" class="form-control" id="end_time" name="end_time" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="submit" class="btn btn-primary">Add Appointment</button>
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Change Appointment Modal -->
+<div class="modal fade" id="changeAppointmentModal" tabindex="-1" aria-labelledby="changeAppointmentModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form id="changeAppointmentForm" method="POST" action="{{ url_for('change_appointment_route') }}">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="changeAppointmentModalLabel">Change Appointment</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" id="update_appointment_id" name="appointment_id">
+                    <div class="form-group">
+                        <label for="display_appointment_id">Appointment ID</label>
+                        <input type="text" class="form-control" id="display_appointment_id" readonly>
+                    </div>
+                    <div class="form-group">
+                        <label for="update_guest_name">Guest Name</label>
+                        <input type="text" class="form-control" id="update_guest_name" name="guest_name" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="update_start_time">Start Time</label>
+                        <input type="datetime-local" class="form-control" id="update_start_time" name="start_time" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="update_end_time">End Time</label>
+                        <input type="datetime-local" class="form-control" id="update_end_time" name="end_time" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="guest_url">Guest URL</label>
+                        <input type="text" class="form-control" id="guest_url" readonly>
+                    </div>
+                    <div class="form-group">
+                        <label for="agent_url">Agent URL</label>
+                        <input type="text" class="form-control" id="agent_url" readonly>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="submit" class="btn btn-primary">Update Appointment</button>
+                    <button type="button" class="btn btn-danger" id="cancelAppointmentButton">Cancel Appointment</button>
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/moment@2.29.1/min/moment.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@5.10.2/main.min.js"></script>
+<script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.bundle.min.js"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+    var calendarEl = document.getElementById('calendar');
+    var userTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone; // Get user's local timezone
+
+    // Fetch and process appointments, then initialize the calendar and list view
+    fetchAppointments().then(appointments => {
+        var events = processAppointments(appointments, userTimeZone);
+        initializeCalendar(calendarEl, events, userTimeZone);
+        populateListView(appointments, userTimeZone);
+    });
+
+    // Toggle view button
+    $('#toggleViewButton1').click(function() {
+        $('#calendarView').toggle();
+        $('#listView').toggle();
+    });
+    $('#toggleViewButton2').click(function() {
+        $('#calendarView').toggle();
+        $('#listView').toggle();
+    });
+
+    // Generic form submission handling
+    function handleFormSubmit(event) {
+        event.preventDefault();
+        var form = $(this);
+        var url = form.attr('action');
+        var formData = convertToUTC(form.serializeArray());
+
+        $.post(url, formData).done(function(data) {
+            window.location.reload(); // Reload the page to update the calendar
+        }).fail(function(xhr) {
+            var response = JSON.parse(xhr.responseText);
+            alert(response.message); // Show an alert with the error message
+        });
+    }
+
+    // Attach generic handler to both forms
+    $('#addAppointmentForm').submit(handleFormSubmit);
+    $('#changeAppointmentForm').submit(handleFormSubmit);
+
+    // Handle deletion of appointments
+    $('#cancelAppointmentButton').click(function() {
+        var appointmentId = $('#update_appointment_id').val();
+        $.ajax({
+            url: "/delete/" + appointmentId,
+            type: 'POST',
+            success: function(result) {
+                $('#changeAppointmentModal').modal('hide');
+                location.reload(); // Reload to see changes or use calendar.refetchEvents();
+            },
+            error: function(xhr) {
+                alert('Error deleting appointment: ' + xhr.statusText);
+            }
+        });
+    });
+});
+
+function fetchAppointments() {
+    // This function should ideally make an AJAX call to fetch appointments
+    // Returning a promise as an example
+    return Promise.resolve([
+        {% for app in appointments %}
+        {
+            id: '{{ app["id"] }}',
+            title: '{{ app["attributes"]["guest-display-name"] }}',
+            start: '{{ app["attributes"]["start-time"] }}',
+            end: '{{ app["attributes"]["end-time"] }}',
+            guest_url: '{{ app["attributes"]["guest_url"] }}',
+            agent_url: '{{ app["attributes"]["agent_url"] }}'
+        },
+        {% endfor %}
+    ]);
+}
+
+function processAppointments(appointments, timeZone) {
+    // Process the fetched appointments, adjusting the time zone if necessary
+    return appointments.map(app => ({
+        ...app,
+        start: new Date(app.start + 'Z').toLocaleString('sv-SE', { timeZone: timeZone }),
+        end: new Date(app.end + 'Z').toLocaleString('sv-SE', { timeZone: timeZone })
+    }));
+}
+
+function initializeCalendar(calendarEl, events, timeZone) {
+    var calendar = new FullCalendar.Calendar(calendarEl, {
+        initialView: 'dayGridMonth',
+        timeZone: timeZone,
+        events: events,
+        dateClick: function(info) {
+            $('#start_time').val(info.dateStr + 'T00:00');
+            $('#end_time').val(info.dateStr + 'T00:00');
+            $('#addAppointmentModal').modal('show');
+        },
+        eventClick: function(info) {
+            var event = info.event;
+            $('#update_appointment_id').val(event.id);
+            $('#display_appointment_id').val(event.id);
+            $('#update_guest_name').val(event.title);
+            $('#update_start_time').val(event.start.toISOString().slice(0, -1)); // remove 'Z' suffix
+            $('#update_end_time').val(event.end.toISOString().slice(0, -1)); // remove 'Z' suffix
+            $('#guest_url').val(event.extendedProps.guest_url);
+            $('#agent_url').val(event.extendedProps.agent_url);
+            $('#changeAppointmentModal').modal('show');
+        }
+    });
+    calendar.render();
+}
+
+function populateListView(appointments, timeZone) {
+    var listEl = $('#appointmentList');
+    appointments.forEach(function(app) {
+        var startLocal = new Date(app.start + 'Z').toLocaleString('sv-SE', { timeZone: timeZone });
+        var endLocal = new Date(app.end + 'Z').toLocaleString('sv-SE', { timeZone: timeZone });
+        var listItem = `
+            <li class="list-group-item">
+                <p><strong>${app.title}</strong> </p>
+                <strong>Start:</strong> ${startLocal}
+                <strong>End:</strong> ${endLocal}
+                <button class="btn btn-primary" onclick="editAppointment('${app.id}', '${app.title}', '${app.start}', '${app.end}', '${app.guest_url}', '${app.agent_url}')">Edit</button>
+            </li>`;
+        listEl.append(listItem);
+    });
+}
+
+function editAppointment(id, title, start, end, guest_url, agent_url) {
+    $('#update_appointment_id').val(id);
+    $('#display_appointment_id').val(id);
+    $('#update_guest_name').val(title);
+    $('#update_start_time').val(new Date(start + 'Z').toISOString().slice(0, -1)); // remove 'Z' suffix
+    $('#update_end_time').val(new Date(end + 'Z').toISOString().slice(0, -1)); // remove 'Z' suffix
+    $('#guest_url').val(guest_url);
+    $('#agent_url').val(agent_url);
+    $('#changeAppointmentModal').modal('show');
+}
+
+function convertToUTC(formData) {
+    formData.forEach(function(item) {
+        if (item.name === 'start_time' || item.name === 'end_time') {
+            var localDate = new Date(item.value);
+            item.value = localDate.toISOString().slice(0, -1); // Convert to UTC and remove 'Z' suffix
+        }
+    });
+    return $.param(formData);
+}
+
+</script>
+</body>
+</html>
