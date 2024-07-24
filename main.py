@@ -20,7 +20,7 @@ HEADERS = {
     'X-Authorization': f'Token {API_KEY}'
 }
 
-def get_appointments(page_number=1, page_size=50):
+def fetch_appointments(page_number=1, page_size=50):
     params = {
         'page[number]': page_number,
         'page[size]': page_size
@@ -69,7 +69,7 @@ def check_conflict(start_time, end_time, appointments):
 def index():
     page_number = request.args.get('page', 1, type=int)
     page_size = request.args.get('size', 50, type=int)
-    appointments, record_count, page_count = get_appointments(page_number, page_size)
+    appointments, record_count, page_count = fetch_appointments(page_number, page_size)
     return render_template(
         'index.html',
         appointments=appointments,
@@ -82,28 +82,18 @@ def index():
 @APP.route('/add', methods=['POST'])
 def add_appointment():
     guest_name = request.form['guest_name']
-    # see date comments above
     start_time = datetime.fromisoformat(request.form['start_time'])
     end_time = datetime.fromisoformat(request.form['end_time'])
-    appointments, _, _ = get_appointments()
+
+    # Fetch all existing appointments to check for conflicts
+    appointments, _, _ = fetch_appointments()
     if check_conflict(start_time, end_time, appointments):
         return jsonify({
             'status': 'error',
             'message': 'Time slot not available. Please choose a different time slot.'
         }), 409
 
-    appointment = create_appointment(AGENT_LOGIN, guest_name, start_time, end_time)
-    if appointment:
-        return redirect(url_for('index'))
-    else:
-        return jsonify({
-            'status': 'error',
-            'message': 'Failed to create appointment.'
-        }), 500
-
-def create_appointment(agent_login, guest_name, start_time, end_time):
-    # to avoid duplicating this repeatedly, make a build_payload method that
-    # takes args and returns the data dict
+    # Prepare data for creating the appointment
     data = {
         "data": {
             "type": "appointments",
@@ -112,30 +102,35 @@ def create_appointment(agent_login, guest_name, start_time, end_time):
                 "start-time": start_time.isoformat() + 'Z',
                 "end-time": end_time.isoformat() + 'Z',
                 "status": "SCHEDULED",
-                "agent-login": agent_login,
+                "agent-login": AGENT_LOGIN,
                 "usecase-id": USECASE_ID,
                 "guest-display-name": guest_name,
                 "agent-display-name": "Nate Brown"
             }
         }
     }
-    # change data to json and remove json.dumps()
+
+    # Send the creation request to the server
     response = requests.post(BASE_URL, headers=HEADERS, json=data)
     if response.status_code == 201:
-        return response.json()
+        return redirect(url_for('index'))
     else:
         print(f"Error creating appointment: {response.status_code}")
+        return jsonify({
+            'status': 'error',
+            'message': 'Failed to create appointment.'
+        }), 500
 
 
 @APP.route('/update', methods=['POST'])
-def change_appointment_route():
+def change_appointment():
     appointment_id = request.form['appointment_id']
     guest_name = request.form['guest_name']
     start_time = datetime.fromisoformat(request.form['start_time'])
     end_time = datetime.fromisoformat(request.form['end_time'])
 
     # Fetch all appointments to check for conflicts
-    appointments, _, _ = get_appointments()
+    appointments, _, _ = fetch_appointments()
     # Exclude the current appointment from conflict checking
     filtered_appointments = [appt for appt in appointments if appt['id'] != appointment_id]
     if check_conflict(start_time, end_time, filtered_appointments):
@@ -144,17 +139,7 @@ def change_appointment_route():
             'message': 'Time slot conflict detected. Please choose a different time slot.'
         }), 409
 
-    appointment = update_appointment(appointment_id, guest_name, start_time, end_time)
-    if appointment:
-        return redirect(url_for('index'))
-    else:
-        return jsonify({
-            'status': 'error',
-            'message': 'Failed to update appointment.'
-        }), 500
-
-
-def update_appointment(appointment_id, guest_name, start_time, end_time):
+    # Prepare data for updating the appointment
     data = {
         "data": {
             "id": appointment_id,
@@ -166,11 +151,17 @@ def update_appointment(appointment_id, guest_name, start_time, end_time):
             }
         }
     }
+
+    # Send update request to the server
     response = requests.patch(f"{BASE_URL}/{appointment_id}", headers=HEADERS, json=data)
     if response.status_code == 200:
-        return response.json()
+        return redirect(url_for('index'))
     else:
         print(f"Error updating appointment: {response.status_code}")
+        return jsonify({
+            'status': 'error',
+            'message': 'Failed to update appointment.'
+        }), 500
 
 
 @APP.route('/delete/<int:appointment_id>', methods=['POST'])
