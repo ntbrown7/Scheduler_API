@@ -22,8 +22,7 @@ HEADERS = {
     'X-Authorization': f'Token {API_KEY}'
 }
 
-# make a date_format var:
-DATE_FORMAT = "%Y-%m-%d %H:%M:%SZ"
+
 
 
 def get_appointments(page_number=1, page_size=50):
@@ -41,20 +40,21 @@ def get_appointments(page_number=1, page_size=50):
     meta = response.json().get('meta', {})
     record_count = meta.get('record-count', 0)
     page_count = meta.get('page-count', 0)
+    processed_appointments = []
 
-    # You shouldn't modify lists/dicts during an iteration over them
-    # Make a separate appointment_data list and fill it with flattened
-    # appointments (skip the 'attributes' key and just keep the parsed
-    # List[dict])
     for appointment in appointment_data:
-        # refactor this to not [:-1] and then use
-        # datetime.strptime(appointment["key"]["key"], date_format)
-        appointment['attributes']['start-time'] = datetime.fromisoformat(appointment['attributes']['start-time'][:-1])
-        appointment['attributes']['end-time'] = datetime.fromisoformat(appointment['attributes']['end-time'][:-1])
+
+        st_parsed = datetime.fromisoformat(appointment['attributes']['start-time'][:-1])
+        et_parsed = datetime.fromisoformat(appointment['attributes']['end-time'][:-1])
+
+        appointment['attributes']['start-time'] = st_parsed
+        appointment['attributes']['end-time'] = et_parsed
         appointment['attributes']['guest_url'] = appointment['attributes'].get('guest-default-url', 'URL Not Available')
         appointment['attributes']['agent_url'] = appointment['attributes'].get('agent-default-url', 'URL Not Available')
 
-    return appointment_data, record_count, page_count
+        processed_appointments.append(appointment)
+
+    return processed_appointments, record_count, page_count
 
 
 def check_conflict(start_time, end_time, appointments):
@@ -97,39 +97,22 @@ def create_appointment(agent_login, guest_name, start_time, end_time):
         print(f"Error creating appointment: {response.status_code}")
 
 
-def update_appointment(appointment_id, guest_name, start_time, end_time):
-    data = {
-        "data": {
-            "id": appointment_id,
-            "type": "appointments",
-            "attributes": {
-                # datetime.strftime(end_time, "%Y-%m-%d %H:%M:%SZ")
-                "start-time": start_time.isoformat() + 'Z',
-                "end-time": end_time.isoformat() + 'Z',
-                "guest-display-name": guest_name
-            }
-        }
-    }
-    # change data to json and remove json.dumps()
-    response = requests.patch(f"{BASE_URL}/{appointment_id}", headers=HEADERS, data=json.dumps(data))
-    if response.status_code == 200:
-        return response.json()
-    else:
-        print(f"Error updating appointment: {response.status_code}")
+
 
 
 @APP.route('/')
 def index():
     page_number = request.args.get('page', 1, type=int)
-    # add this to html dropdown?
-    page_size = 50
+    page_size = request.args.get('size', 50, type=int)
     appointments, record_count, page_count = get_appointments(page_number, page_size)
     return render_template(
         'index.html',
         appointments=appointments,
+        page_size=page_size,
         page_number=page_number,
         page_count=page_count
     )
+
 
 
 @APP.route('/add', methods=['POST'])
@@ -139,7 +122,7 @@ def add_appointment():
     start_time = datetime.fromisoformat(request.form['start_time'])
     end_time = datetime.fromisoformat(request.form['end_time'])
 
-    # be ready to explain that _ is placeholder, and you only care about
+    # explain that _ is placeholder, and you only care about
     # appointments in this case
     appointments, _, _ = get_appointments()
     if check_conflict(start_time, end_time, appointments):
@@ -157,13 +140,30 @@ def add_appointment():
             'message': 'Failed to create appointment.'
         }), 500
 
+def update_appointment(appointment_id, guest_name, start_time, end_time):
+    data = {
+        "data": {
+            "id": appointment_id,
+            "type": "appointments",
+            "attributes": {
+                "start-time": start_time.isoformat() + 'Z',
+                "end-time": end_time.isoformat() + 'Z',
+                "guest-display-name": guest_name
+            }
+        }
+    }
+    # change data to json and remove json.dumps()
+    response = requests.patch(f"{BASE_URL}/{appointment_id}", headers=HEADERS, data=json.dumps(data))
+    if response.status_code == 200:
+        return response.json()
+    else:
+        print(f"Error updating appointment: {response.status_code}")
 
 
 @APP.route('/update', methods=['POST'])
 def change_appointment_route():
     appointment_id = request.form['appointment_id']
     guest_name = request.form['guest_name']
-    # see date comments above
     start_time = datetime.fromisoformat(request.form['start_time'])
     end_time = datetime.fromisoformat(request.form['end_time'])
 
@@ -172,7 +172,6 @@ def change_appointment_route():
     # Exclude the current appointment from conflict checking
     filtered_appointments = [appt for appt in appointments if appt['id'] != appointment_id]
     if check_conflict(start_time, end_time, filtered_appointments):
-        # Squash this to return jsonify({}), <code>
         return jsonify({
             'status': 'error',
             'message': 'Time slot conflict detected. Please choose a different time slot.'
@@ -182,7 +181,6 @@ def change_appointment_route():
     if appointment:
         return redirect(url_for('index'))
     else:
-        # Squash this to return jsonify({}), <code>
         return jsonify({
             'status': 'error',
             'message': 'Failed to update appointment.'
